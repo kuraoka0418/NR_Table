@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -21,14 +22,14 @@ func OpenDataCompare(app fyne.App) {
 	w := app.NewWindow("DataCompare")
 	w.Resize(fyne.NewSize(900, 700))
 
-	// 選択可能キーの用意（必要に応じて追加可）
-	keys := []string{
+	// 内部キー一覧（順序を保つ）
+	internalKeys := []string{
 		"WeldCode.Material",
 		"WeldCode.Method",
 		"WeldParm",  // requires index
 		"A2S_Short", // requires index
 		"S2V_Short", // requires index
-		"CalParm",   // requires V index and subfield
+		"CalParm",   // requires V index
 		"V05_Data", "V06_Data", "V08_Data", "V12_Data",
 		"V13_Data", "V15_Data", "V18_Data", "V19_Data", "V20_Data",
 		"V32_Data", "V34_Data", "V36_Data",
@@ -36,9 +37,21 @@ func OpenDataCompare(app fyne.App) {
 		"V94_Data", "V95_Data", "V57_Data", "V93_Data",
 	}
 
-	keySelect := widget.NewSelect(keys, nil)
-	if len(keys) > 0 {
-		keySelect.SetSelected(keys[0])
+	// 説明 -> 内部キー マップと説明リストを作成
+	descToKey := map[string]string{}
+	keyDescs := make([]string, 0, len(internalKeys))
+	for _, k := range internalKeys {
+		desc := fieldDescriptions[k]
+		if desc == "" {
+			desc = k
+		}
+		keyDescs = append(keyDescs, desc)
+		descToKey[desc] = k
+	}
+
+	keySelect := widget.NewSelect(keyDescs, nil)
+	if len(keyDescs) > 0 {
+		keySelect.SetSelected(keyDescs[0])
 	}
 
 	// index entry for array-like keys
@@ -46,35 +59,54 @@ func OpenDataCompare(app fyne.App) {
 	indexEntry.SetPlaceHolder("index (0-based)")
 	indexEntry.Disable()
 
-	// calparm subfield selector (a,b,c,min,max) - enabled only if CalParm selected
-	calSub := widget.NewSelect([]string{"a", "b", "c", "min", "max"}, nil)
-	calSub.SetSelected("a")
-	calSub.Disable()
+	// 指定可能範囲を表示するラベル
+	rangeLabel := widget.NewLabel("")
+	rangeLabel.Hide()
 
 	// status and result area
 	status := widget.NewLabel("")
 	resultBox := container.NewVBox()
 
-	// helper to enable/disable controls based on selected key
-	updateControls := func(selected string) {
-		switch selected {
-		case "WeldParm", "A2S_Short", "S2V_Short":
-			indexEntry.Enable()
-			calSub.Disable()
-		case "CalParm":
-			indexEntry.Enable() // expects V index
-			calSub.Enable()
-		default:
+	// helper to enable/disable controls based on selected description and show valid range
+	updateControls := func(selectedDesc string) {
+		key, ok := descToKey[selectedDesc]
+		if !ok {
 			indexEntry.Disable()
-			calSub.Disable()
+			rangeLabel.Hide()
+			return
+		}
+		switch key {
+		case "WeldParm":
+			indexEntry.Enable()
+			rangeLabel.SetText("指定可能範囲: 0-503")
+			rangeLabel.Show()
+		case "A2S_Short", "S2V_Short":
+			indexEntry.Enable()
+			rangeLabel.SetText("指定可能範囲: 0-255")
+			rangeLabel.Show()
+		case "CalParm":
+			indexEntry.Enable()
+			rangeLabel.SetText("指定可能範囲: 0-22 (V1-V23)")
+			rangeLabel.Show()
+		default:
+			// Vxx arrays
+			if len(key) > 0 && key[0] == 'V' {
+				indexEntry.Enable()
+				rangeLabel.SetText("指定可能範囲: 0-127")
+				rangeLabel.Show()
+			} else {
+				indexEntry.Disable()
+				rangeLabel.Hide()
+			}
 		}
 	}
 
 	keySelect.OnChanged = updateControls
 	updateControls(keySelect.Selected)
 
-	// value extractor: returns string representation for given table/key/index/sub
-	getValue := func(tbl *mydata.TableData, key string, idx int, sub string) string {
+	// value extractor: returns string representation for given table/internalKey/index
+	// CalParm の場合は a,b,c,min,max を横に並べた文字列を返す
+	getValue := func(tbl *mydata.TableData, key string, idx int) string {
 		v := reflect.ValueOf(*tbl)
 		switch key {
 		case "WeldCode.Material":
@@ -82,69 +114,67 @@ func OpenDataCompare(app fyne.App) {
 		case "WeldCode.Method":
 			return fmt.Sprintf("%d", tbl.WeldCode.Method)
 		case "WeldParm":
-			if idx >= 0 && idx < len(tbl.WeldParm.Parm) {
-				return fmt.Sprintf("0x%04X", tbl.WeldParm.Parm[idx])
+			if idx < 0 || idx >= len(tbl.WeldParm.Parm) {
+				return "<範囲外>"
 			}
-			return "<oob>"
+			return fmt.Sprintf("0x%04X", tbl.WeldParm.Parm[idx])
 		case "A2S_Short":
-			if idx >= 0 && idx < len(tbl.A2S_Short.Speed) {
-				return fmt.Sprintf("%d", tbl.A2S_Short.Speed[idx])
+			if idx < 0 || idx >= len(tbl.A2S_Short.Speed) {
+				return "<範囲外>"
 			}
-			return "<oob>"
+			return fmt.Sprintf("%d", tbl.A2S_Short.Speed[idx])
 		case "S2V_Short":
-			if idx >= 0 && idx < len(tbl.S2V_Short.Values) {
-				return fmt.Sprintf("%d", tbl.S2V_Short.Values[idx])
+			if idx < 0 || idx >= len(tbl.S2V_Short.Values) {
+				return "<範囲外>"
 			}
-			return "<oob>"
+			return fmt.Sprintf("%d", tbl.S2V_Short.Values[idx])
 		case "CalParm":
-			// CalParm may be either [116]float32 (flat) or []DCCALPARM-like struct.
+			// CalParm の場合、指定された V# の a,b,c,min,max を横並びで表示
 			rv := v.FieldByName("CalParm")
 			if !rv.IsValid() {
 				return "<na>"
 			}
-			// if array/slice of structs
 			if rv.Kind() == reflect.Array || rv.Kind() == reflect.Slice {
 				elem := rv.Index(0)
 				if elem.Kind() == reflect.Struct {
-					if idx >= 0 && idx < rv.Len() {
-						el := rv.Index(idx)
-						switch sub {
-						case "a", "A":
-							return formatReflectFloatField(el, "A", 0)
-						case "b", "B":
-							return formatReflectFloatField(el, "B", 1)
-						case "c", "C":
-							return formatReflectFloatField(el, "C", 2)
-						case "min", "Min":
-							return formatReflectFloatField(el, "Min", 3)
-						case "max", "Max":
-							return formatReflectFloatField(el, "Max", 4)
-						}
+					// 構造体配列の場合
+					if idx < 0 || idx >= rv.Len() {
+						return "<範囲外>"
 					}
-					return "<oob>"
-				}
-				// elements are floats (flat representation), group by 5-per-V
-				if elem.Kind() == reflect.Float32 || elem.Kind() == reflect.Float64 {
-					// treat CalParm as flattened floats; idx is Vn-1, sub selects offset within 5
+					el := rv.Index(idx)
+					aStr := getFloatFieldAsString(el, "A")
+					if aStr == "" {
+						aStr = formatValue(el.Field(0))
+					}
+					bStr := getFloatFieldAsString(el, "B")
+					if bStr == "" {
+						bStr = formatValue(el.Field(1))
+					}
+					cStr := getFloatFieldAsString(el, "C")
+					if cStr == "" {
+						cStr = formatValue(el.Field(2))
+					}
+					minStr := getFloatFieldAsString(el, "Min")
+					if minStr == "" {
+						minStr = formatValue(el.Field(3))
+					}
+					maxStr := getFloatFieldAsString(el, "Max")
+					if maxStr == "" {
+						maxStr = formatValue(el.Field(4))
+					}
+					return fmt.Sprintf("a=%s, b=%s, c=%s, min=%s, max=%s", aStr, bStr, cStr, minStr, maxStr)
+				} else if elem.Kind() == reflect.Float32 || elem.Kind() == reflect.Float64 {
+					// フラット配列の場合、5個ずつグループ化
 					base := idx * 5
-					offset := 0
-					switch sub {
-					case "a":
-						offset = 0
-					case "b":
-						offset = 1
-					case "c":
-						offset = 2
-					case "min":
-						offset = 3
-					case "max":
-						offset = 4
+					if base < 0 || base+4 >= rv.Len() {
+						return "<範囲外>"
 					}
-					if base+offset >= 0 && base+offset < rv.Len() {
-						fv := rv.Index(base + offset).Float()
-						return fmt.Sprintf("%.6g", fv)
-					}
-					return "<oob>"
+					a := fmt.Sprintf("%.6g", rv.Index(base).Float())
+					b := fmt.Sprintf("%.6g", rv.Index(base+1).Float())
+					c := fmt.Sprintf("%.6g", rv.Index(base+2).Float())
+					min := fmt.Sprintf("%.6g", rv.Index(base+3).Float())
+					max := fmt.Sprintf("%.6g", rv.Index(base+4).Float())
+					return fmt.Sprintf("a=%s, b=%s, c=%s, min=%s, max=%s", a, b, c, min, max)
 				}
 			}
 			return "<unknown CalParm>"
@@ -152,10 +182,10 @@ func OpenDataCompare(app fyne.App) {
 			// try to map Vxx fields by reflection
 			f := v.FieldByName(key)
 			if f.IsValid() && (f.Kind() == reflect.Array || f.Kind() == reflect.Slice) {
-				if idx >= 0 && idx < f.Len() {
-					return formatValue(f.Index(idx))
+				if idx < 0 || idx >= f.Len() {
+					return "<範囲外>"
 				}
-				return "<oob>"
+				return formatValue(f.Index(idx))
 			}
 			// fallback: try direct field
 			f2 := v.FieldByName(key)
@@ -172,13 +202,33 @@ func OpenDataCompare(app fyne.App) {
 			status.SetText("No tables loaded")
 			return
 		}
-		key := keySelect.Selected
-		if key == "" {
+		selectedDesc := keySelect.Selected
+		if selectedDesc == "" {
 			status.SetText("Select a key")
 			return
 		}
+		key, ok := descToKey[selectedDesc]
+		if !ok {
+			status.SetText("Invalid key")
+			return
+		}
+
 		idx := -1
-		if indexEntry.Text != "" {
+		needsIndex := false
+		switch key {
+		case "WeldParm", "A2S_Short", "S2V_Short", "CalParm":
+			needsIndex = true
+		default:
+			if len(key) > 0 && key[0] == 'V' {
+				needsIndex = true
+			}
+		}
+
+		if needsIndex {
+			if indexEntry.Text == "" {
+				status.SetText("Index を指定してください")
+				return
+			}
 			if n, err := strconv.Atoi(indexEntry.Text); err == nil {
 				idx = n
 			} else {
@@ -186,15 +236,24 @@ func OpenDataCompare(app fyne.App) {
 				return
 			}
 		}
-		sub := calSub.Selected
 
 		counts := map[string]int{}
 		values := make([]string, len(mydata.TableList))
+		hasError := false
 		for i := range mydata.TableList {
-			val := getValue(&mydata.TableList[i], key, idx, sub)
+			val := getValue(&mydata.TableList[i], key, idx)
 			values[i] = val
+			if val == "<範囲外>" {
+				hasError = true
+			}
 			counts[val]++
 		}
+
+		if hasError {
+			status.SetText("エラー: 指定された index が範囲外です")
+			return
+		}
+
 		// find max frequency
 		max := 0
 		for _, c := range counts {
@@ -211,7 +270,6 @@ func OpenDataCompare(app fyne.App) {
 		}
 
 		// build result UI: per-table table (2 columns: Table | Value)
-		// replace result content with a taller, scrollable table (no summary/legend below)
 		resultBox.Objects = nil
 
 		// create a grid with 2 columns: Table index, Value
@@ -221,7 +279,8 @@ func OpenDataCompare(app fyne.App) {
 		grid.Add(widget.NewLabelWithStyle("Value", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
 		for i, val := range values {
 			grid.Add(widget.NewLabel(fmt.Sprintf("%d", i)))
-			col := color.RGBA{R: 0, G: 0, B: 0, A: 255}
+			// 通常テキストはテーマの foreground を使い、ダーク/ライト両対応にする
+			col := theme.ForegroundColor()
 			if _, ok := maxVals[val]; ok {
 				col = color.RGBA{R: 0, G: 128, B: 0, A: 255}
 			}
@@ -237,11 +296,13 @@ func OpenDataCompare(app fyne.App) {
 		status.SetText(fmt.Sprintf("Compared %d tables", len(values)))
 	})
 
-	controls := container.NewHBox(
-		widget.NewLabel("Key:"), keySelect,
-		widget.NewLabel("Index:"), indexEntry,
-		widget.NewLabel("Cal sub:"), calSub,
-		compareBtn, status,
+	controls := container.NewVBox(
+		container.NewHBox(
+			widget.NewLabel("Key:"), keySelect,
+			widget.NewLabel("Index:"), indexEntry,
+			compareBtn, status,
+		),
+		rangeLabel,
 	)
 
 	content := container.NewBorder(controls, nil, nil, nil, container.NewVScroll(resultBox))
