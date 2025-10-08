@@ -14,20 +14,40 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// OpenTwoCompare は 2 つのテーブルを比較するためのウィンドウを開きます。
-// 指示書に従い、全データを表形式で表示し、異なる値はハイライトします。
-// 大きな配列は遅延レンダリング(createLazyGrid)で生成します。
-func OpenTwoCompare(app fyne.App) {
-	w := app.NewWindow("TwoCompare - Prototype")
-	w.Resize(fyne.NewSize(1000, 700))
+// makeWrappedLabel は折り返し有効なラベルを生成し、表示が縦並びにならないよう最小幅を指定します。
+// makeWrappedLabel は折り返し有効なラベルを生成します。
+// ラベル単体では最小幅を設定できないため、必要に応じて
+// wrapWithMinWidth でラベルを包んで使用してください。
+func makeWrappedLabel(text string) *widget.Label {
+	lbl := widget.NewLabel(text)
+	lbl.Wrapping = fyne.TextWrapWord
+	return lbl
+}
 
-	// インデックス文字列準備
+// wrapWithMinWidth は与えたラベルを横幅を確保するコンテナで包みます。
+// これにより長い単語が縦に1文字ずつ並ぶ縦書きのような表示を防ぎます。
+func wrapWithMinWidth(c fyne.CanvasObject, minWidth float32) fyne.CanvasObject {
+	spacer := canvas.NewRectangle(color.Transparent)
+	spacer.SetMinSize(fyne.NewSize(minWidth, 1))
+	return container.NewHBox(spacer, c)
+}
+
+// OpenTwoCompare は 2 つのテーブルを比較するウィンドウを開きます。
+// 左右にテーブルを並べ、差分を色でハイライトします。
+// 全データを表形式で表示し、大量データは遅延レンダリングで高速化します。
+func OpenTwoCompare(app fyne.App) {
+	w := app.NewWindow("TwoCompare")
+	w.Resize(fyne.NewSize(1200, 700))
+
+	// テーブル数チェック
 	numTables := len(mydata.TableList)
 	if numTables == 0 {
 		w.SetContent(container.NewVBox(widget.NewLabel("No tables loaded")))
 		w.Show()
 		return
 	}
+
+	// インデックスリスト作成
 	idxs := make([]string, numTables)
 	for i := 0; i < numTables; i++ {
 		idxs[i] = fmt.Sprintf("%d", i)
@@ -39,19 +59,24 @@ func OpenTwoCompare(app fyne.App) {
 	leftSelect.SetSelectedIndex(0)
 	if len(idxs) > 1 {
 		rightSelect.SetSelectedIndex(1)
+	} else {
+		rightSelect.SetSelectedIndex(0)
 	}
 
 	compareBtn := widget.NewButton("Compare", nil)
 	status := widget.NewLabel("")
 
-	// 左右の表示領域（縦スクロールのみ、横幅を固定して横スクロールを防止）
+	// 表示領域（縦スクロールのみ）
+	// 初期は左側用の空のコンテンツを作る（後でウィンドウ中央を差し替える）
 	leftContent := container.NewVBox(widget.NewLabel("Left table not selected"))
-	rightContent := container.NewVBox(widget.NewLabel("Right table not selected"))
-	leftBox := container.NewVScroll(leftContent)
-	rightBox := container.NewVScroll(rightContent)
-	// 横幅を固定して、ウィンドウが横に伸びるのを防ぐ
-	leftBox.SetMinSize(fyne.NewSize(450, 600))
-	rightBox.SetMinSize(fyne.NewSize(450, 600))
+	leftScroll := container.NewVScroll(leftContent)
+
+	// コントロール行（先に作成して compareAction で使用する）
+	controls := container.NewHBox(
+		widget.NewLabel("Left:"), leftSelect,
+		widget.NewLabel("Right:"), rightSelect,
+		compareBtn, status,
+	)
 
 	// 比較処理
 	compareAction := func() {
@@ -70,33 +95,32 @@ func OpenTwoCompare(app fyne.App) {
 		a := mydata.TableList[li]
 		b := mydata.TableList[ri]
 
-		// 左右それぞれのカラムを生成してセット（外側の VScroll が縦スクロールを担う）
-		leftContent.Objects = []fyne.CanvasObject{buildComparisonColumn(&a, &b, true)}
-		leftContent.Refresh()
-		rightContent.Objects = []fyne.CanvasObject{buildComparisonColumn(&a, &b, false)}
-		rightContent.Refresh()
-		status.SetText(fmt.Sprintf("Compared %d ↔ %d", li, ri))
+		// 左右を統合した比較ビューを作成（同期スクロール）
+		unifiedView := buildUnifiedComparisonView(&a, &b)
+
+		// 新しいスクロールを作成（1つのスクロールで左右を包む）
+		newScroll := container.NewVScroll(unifiedView)
+
+		// ウィンドウの中央コンテンツを新しいスクロールに置き換える
+		newContent := container.NewBorder(controls, nil, nil, nil, newScroll)
+		w.SetContent(newContent)
+
+		newScroll.ScrollToTop()
+
+		status.SetText(fmt.Sprintf("Compared Table %d ↔ Table %d", li, ri))
 	}
 
 	compareBtn.OnTapped = compareAction
 
-	// コントロール行とレイアウト
-	controlRow := container.NewHBox(
-		widget.NewLabel("Left:"), leftSelect,
-		widget.NewLabel("Right:"), rightSelect,
-		compareBtn, status,
-	)
-	split := container.NewHSplit(container.NewVBox(controlRow, leftBox), rightBox)
-	split.SetOffset(0.5)
-
-	w.SetContent(split)
+	// メインレイアウト: 上部にコントロール、下部は中央に単一スクロール
+	content := container.NewBorder(controls, nil, nil, nil, leftScroll)
+	w.SetContent(content)
 	w.Show()
 }
 
-// buildComparisonColumn は比較対象の一方分を縦に並べた表示を返します。
-// left==true のとき左側の値を表示し、false のとき右側の値を表示します。
-// 両側は同じフィールド順で生成されるため視覚上の整列が取れます。
-func buildComparisonColumn(a, b *mydata.TableData, left bool) fyne.CanvasObject {
+// buildUnifiedComparisonView は左右のテーブルを並べて表示する統合ビューを構築します。
+// 1つのスクロール領域に左右を配置することで同期スクロールを実現します。
+func buildUnifiedComparisonView(a, b *mydata.TableData) fyne.CanvasObject {
 	sections := []fyne.CanvasObject{}
 
 	va := reflect.ValueOf(*a)
@@ -111,103 +135,334 @@ func buildComparisonColumn(a, b *mydata.TableData, left bool) fyne.CanvasObject 
 		if desc != "" {
 			header = fmt.Sprintf("%s — %s", name, desc)
 		}
-		// セクション見出し
-		sections = append(sections, widget.NewLabelWithStyle(header, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+
+		// セクション見出し（折り返し有効）
+		h := widget.NewLabelWithStyle(header, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+		h.Wrapping = fyne.TextWrapWord
+		sections = append(sections, h)
 
 		fa := va.Field(i)
 		fb := vb.Field(i)
 
-		// 配列／スライスは遅延レンダリングのアコーディオンで表示（index + value）
-		if fa.Kind() == reflect.Array || fa.Kind() == reflect.Slice {
-			title := fmt.Sprintf("%s (array)", name)
-			item := widget.NewAccordionItem(title, createLazyGrid(func() fyne.CanvasObject {
-				// 表示は index | value(for this side) の 2 列。差分は色で示す（赤=差分）
-				// 横幅を制限するため、固定幅のコンテナで囲む
-				innerBox := container.NewVBox()
-				n := fa.Len()
-				for idx := 0; idx < n; idx++ {
-					// 値文字列（右側が存在すれば比較して色付け）
-					var leftStr, rightStr string
-					if idx < fa.Len() {
-						leftStr = formatValue(fa.Index(idx))
-					} else {
-						leftStr = "<nil>"
-					}
-					if idx < fb.Len() {
-						rightStr = formatValue(fb.Index(idx))
-					} else {
-						rightStr = "<nil>"
-					}
-					// どちら側を表示するか
-					display := leftStr
-					other := rightStr
-					if !left {
-						display = rightStr
-						other = leftStr
-					}
-					c := pickColor(display, other)
-
-					// 1行ずつHBoxで表示（index: value の形式）
-					rowLabel := widget.NewLabel(fmt.Sprintf("[%d]:", idx))
-					rowLabel.Wrapping = fyne.TextTruncate
-					valueText := canvas.NewText(display, c)
-					valueText.TextSize = 12
-					row := container.NewHBox(rowLabel, valueText)
-					innerBox.Add(row)
+		// WeldParm は専用表 (H###, 0xXXXX) - 左右3列で表示
+		if name == "WeldParm" && fa.Kind() == reflect.Struct {
+			item := widget.NewAccordionItem(header, createLazyGrid(func() fyne.CanvasObject {
+				arr := fa.FieldByName("Parm")
+				arrB := fb.FieldByName("Parm")
+				if !arr.IsValid() || (arr.Kind() != reflect.Array && arr.Kind() != reflect.Slice) {
+					return widget.NewLabel("WeldParm format unsupported")
 				}
-				return innerBox
+				n := arr.Len()
+				grid := container.NewGridWithColumns(3)
+				grid.Add(widget.NewLabel("H#"))
+				grid.Add(widget.NewLabel("Left"))
+				grid.Add(widget.NewLabel("Right"))
+				for j := 0; j < n; j++ {
+					grid.Add(widget.NewLabel(fmt.Sprintf("H%03d", j+1)))
+					leftStr := fmt.Sprintf("0x%04X", arr.Index(j).Uint())
+					rightStr := "<nil>"
+					if arrB.IsValid() && j < arrB.Len() {
+						rightStr = fmt.Sprintf("0x%04X", arrB.Index(j).Uint())
+					}
+
+					lbl1 := wrapWithMinWidth(makeWrappedLabel(leftStr), 260)
+					lbl2 := wrapWithMinWidth(makeWrappedLabel(rightStr), 260)
+
+					c := pickCompareColor(leftStr, rightStr)
+					if c != (color.RGBA{R: 0, G: 0, B: 0, A: 255}) {
+						rect1 := canvas.NewRectangle(c)
+						rect1.SetMinSize(fyne.NewSize(10, 10))
+						rect2 := canvas.NewRectangle(c)
+						rect2.SetMinSize(fyne.NewSize(10, 10))
+						grid.Add(container.NewHBox(rect1, lbl1))
+						grid.Add(container.NewHBox(rect2, lbl2))
+					} else {
+						grid.Add(lbl1)
+						grid.Add(lbl2)
+					}
+				}
+				return grid
 			}))
 			acc := widget.NewAccordion(item)
 			sections = append(sections, acc, widget.NewSeparator())
 			continue
 		}
 
-		// 構造体は内部フィールドを展開して表示（WeldCode など）
-		if fa.Kind() == reflect.Struct {
-			innerBox := container.NewVBox()
-			// サブフィールドを順に表示（横幅を制限）
-			for j := 0; j < fa.NumField(); j++ {
-				subName := fa.Type().Field(j).Name
-				leftStr := formatValue(fa.Field(j))
-				rightStr := formatValue(fb.Field(j))
-				display := leftStr
-				other := rightStr
-				if !left {
-					display = rightStr
-					other = leftStr
+		// CalParm は専用表 (V#, a,b,c,min,max) - 左右で並べる
+		if name == "CalParm" {
+			item := widget.NewAccordionItem(header, createLazyGrid(func() fyne.CanvasObject {
+				calcObjA := fa
+				calcObjB := fb
+				if calcObjA.Kind() != reflect.Array && calcObjA.Kind() != reflect.Slice {
+					return widget.NewLabel("CalParm format unsupported")
 				}
+				elemKind := calcObjA.Type().Elem().Kind()
+				if elemKind == reflect.Struct {
+					// 構造体配列: V# | Left(a,b,c,min,max) | Right(a,b,c,min,max)
+					vbox := container.NewVBox()
+					headerRow := container.NewGridWithColumns(3)
+					headerRow.Add(widget.NewLabel("V#"))
+					headerRow.Add(widget.NewLabel("Left (a,b,c,min,max)"))
+					headerRow.Add(widget.NewLabel("Right (a,b,c,min,max)"))
+					vbox.Add(headerRow)
 
-				// フィールド名: 値 の形式で1行ずつ表示
-				fieldLabel := widget.NewLabel(fmt.Sprintf("%s:", subName))
-				fieldLabel.Wrapping = fyne.TextTruncate
-				valueText := canvas.NewText(display, pickColor(display, other))
-				valueText.TextSize = 12
-				row := container.NewHBox(fieldLabel, valueText)
-				innerBox.Add(row)
-			}
-			sections = append(sections, innerBox, widget.NewSeparator())
+					for vi := 0; vi < calcObjA.Len(); vi++ {
+						elA := calcObjA.Index(vi)
+						elB := reflect.Value{}
+						if vi < calcObjB.Len() {
+							elB = calcObjB.Index(vi)
+						}
+
+						// 左側の値
+						aStr := getFloatFieldAsString(elA, "A")
+						if aStr == "" {
+							aStr = formatCompareValue(elA.Field(0))
+						}
+						bStr := getFloatFieldAsString(elA, "B")
+						if bStr == "" {
+							bStr = formatCompareValue(elA.Field(1))
+						}
+						cStr := getFloatFieldAsString(elA, "C")
+						if cStr == "" {
+							cStr = formatCompareValue(elA.Field(2))
+						}
+						minStr := getFloatFieldAsString(elA, "Min")
+						if minStr == "" {
+							minStr = formatCompareValue(elA.Field(3))
+						}
+						maxStr := getFloatFieldAsString(elA, "Max")
+						if maxStr == "" {
+							maxStr = formatCompareValue(elA.Field(4))
+						}
+						leftVal := fmt.Sprintf("%s,%s,%s,%s,%s", aStr, bStr, cStr, minStr, maxStr)
+
+						// 右側の値
+						var aStrB, bStrB, cStrB, minStrB, maxStrB string
+						if elB.IsValid() {
+							aStrB = getFloatFieldAsString(elB, "A")
+							if aStrB == "" {
+								aStrB = formatCompareValue(elB.Field(0))
+							}
+							bStrB = getFloatFieldAsString(elB, "B")
+							if bStrB == "" {
+								bStrB = formatCompareValue(elB.Field(1))
+							}
+							cStrB = getFloatFieldAsString(elB, "C")
+							if cStrB == "" {
+								cStrB = formatCompareValue(elB.Field(2))
+							}
+							minStrB = getFloatFieldAsString(elB, "Min")
+							if minStrB == "" {
+								minStrB = formatCompareValue(elB.Field(3))
+							}
+							maxStrB = getFloatFieldAsString(elB, "Max")
+							if maxStrB == "" {
+								maxStrB = formatCompareValue(elB.Field(4))
+							}
+						}
+						rightVal := fmt.Sprintf("%s,%s,%s,%s,%s", aStrB, bStrB, cStrB, minStrB, maxStrB)
+
+						row := container.NewGridWithColumns(3)
+						row.Add(widget.NewLabel(fmt.Sprintf("V%d", vi+1)))
+
+						lbl1 := wrapWithMinWidth(makeWrappedLabel(leftVal), 260)
+						lbl2 := wrapWithMinWidth(makeWrappedLabel(rightVal), 260)
+
+						c := pickCompareColor(leftVal, rightVal)
+						if c != (color.RGBA{R: 0, G: 0, B: 0, A: 255}) {
+							rect1 := canvas.NewRectangle(c)
+							rect1.SetMinSize(fyne.NewSize(10, 10))
+							rect2 := canvas.NewRectangle(c)
+							rect2.SetMinSize(fyne.NewSize(10, 10))
+							row.Add(container.NewHBox(rect1, lbl1))
+							row.Add(container.NewHBox(rect2, lbl2))
+						} else {
+							row.Add(lbl1)
+							row.Add(lbl2)
+						}
+						vbox.Add(row)
+					}
+					return vbox
+				} else if elemKind == reflect.Float32 || elemKind == reflect.Float64 {
+					// フラット配列: 5個ずつグループ化
+					vbox := container.NewVBox()
+					headerRow := container.NewGridWithColumns(3)
+					headerRow.Add(widget.NewLabel("V#"))
+					headerRow.Add(widget.NewLabel("Left (a,b,c,min,max)"))
+					headerRow.Add(widget.NewLabel("Right (a,b,c,min,max)"))
+					vbox.Add(headerRow)
+
+					total := calcObjA.Len()
+					if total >= 5 && total%5 == 0 {
+						count := total / 5
+						for vi := 0; vi < count; vi++ {
+							base := vi * 5
+							leftVals := make([]string, 5)
+							rightVals := make([]string, 5)
+							for j := 0; j < 5; j++ {
+								leftVals[j] = fmt.Sprintf("%.6g", calcObjA.Index(base+j).Float())
+								if base+j < calcObjB.Len() {
+									rightVals[j] = fmt.Sprintf("%.6g", calcObjB.Index(base+j).Float())
+								} else {
+									rightVals[j] = "<nil>"
+								}
+							}
+							leftStr := fmt.Sprintf("%s,%s,%s,%s,%s", leftVals[0], leftVals[1], leftVals[2], leftVals[3], leftVals[4])
+							rightStr := fmt.Sprintf("%s,%s,%s,%s,%s", rightVals[0], rightVals[1], rightVals[2], rightVals[3], rightVals[4])
+
+							row := container.NewGridWithColumns(3)
+							row.Add(widget.NewLabel(fmt.Sprintf("V%d", vi+1)))
+
+							lbl1 := wrapWithMinWidth(makeWrappedLabel(leftStr), 260)
+							lbl2 := wrapWithMinWidth(makeWrappedLabel(rightStr), 260)
+
+							c := pickCompareColor(leftStr, rightStr)
+							if c != (color.RGBA{R: 0, G: 0, B: 0, A: 255}) {
+								rect1 := canvas.NewRectangle(c)
+								rect1.SetMinSize(fyne.NewSize(10, 10))
+								rect2 := canvas.NewRectangle(c)
+								rect2.SetMinSize(fyne.NewSize(10, 10))
+								row.Add(container.NewHBox(rect1, lbl1))
+								row.Add(container.NewHBox(rect2, lbl2))
+							} else {
+								row.Add(lbl1)
+								row.Add(lbl2)
+							}
+							vbox.Add(row)
+						}
+					}
+					return vbox
+				}
+				return widget.NewLabel("Unknown CalParm format")
+			}))
+			acc := widget.NewAccordion(item)
+			sections = append(sections, acc, widget.NewSeparator())
 			continue
 		}
 
-		// プリミティブ値は単一行表示
-		leftStr := formatValue(fa)
-		rightStr := formatValue(fb)
-		display := leftStr
-		other := rightStr
-		if !left {
-			display = rightStr
-			other = leftStr
+		// 配列／スライス (汎用): Index | Left | Right の3列
+		if fa.Kind() == reflect.Array || fa.Kind() == reflect.Slice {
+			title := header + " (array)"
+			item := widget.NewAccordionItem(title, createLazyGrid(func() fyne.CanvasObject {
+				grid := container.NewGridWithColumns(3)
+				grid.Add(widget.NewLabel("Index"))
+				grid.Add(widget.NewLabel("Left"))
+				grid.Add(widget.NewLabel("Right"))
+				n := fa.Len()
+				for idx := 0; idx < n; idx++ {
+					grid.Add(widget.NewLabel(fmt.Sprintf("%d", idx)))
+					leftStr := formatCompareValue(fa.Index(idx))
+					rightStr := "<nil>"
+					if idx < fb.Len() {
+						rightStr = formatCompareValue(fb.Index(idx))
+					}
+
+					lbl1 := wrapWithMinWidth(makeWrappedLabel(leftStr), 260)
+					lbl2 := wrapWithMinWidth(makeWrappedLabel(rightStr), 260)
+
+					c := pickCompareColor(leftStr, rightStr)
+					if c != (color.RGBA{R: 0, G: 0, B: 0, A: 255}) {
+						rect1 := canvas.NewRectangle(c)
+						rect1.SetMinSize(fyne.NewSize(10, 10))
+						rect2 := canvas.NewRectangle(c)
+						rect2.SetMinSize(fyne.NewSize(10, 10))
+						grid.Add(container.NewHBox(rect1, lbl1))
+						grid.Add(container.NewHBox(rect2, lbl2))
+					} else {
+						grid.Add(lbl1)
+						grid.Add(lbl2)
+					}
+				}
+				return grid
+			}))
+			acc := widget.NewAccordion(item)
+			sections = append(sections, acc, widget.NewSeparator())
+			continue
 		}
-		sections = append(sections, canvas.NewText(display, pickColor(display, other)), widget.NewSeparator())
+
+		// 構造体: Field | Left | Right の3列
+		if fa.Kind() == reflect.Struct {
+			grid := container.NewGridWithColumns(3)
+			grid.Add(widget.NewLabel("Field"))
+			grid.Add(widget.NewLabel("Left"))
+			grid.Add(widget.NewLabel("Right"))
+			for j := 0; j < fa.NumField(); j++ {
+				subName := fa.Type().Field(j).Name
+				grid.Add(widget.NewLabel(subName))
+				leftStr := formatCompareValue(fa.Field(j))
+				rightStr := formatCompareValue(fb.Field(j))
+
+				lbl1 := wrapWithMinWidth(makeWrappedLabel(leftStr), 260)
+				lbl2 := wrapWithMinWidth(makeWrappedLabel(rightStr), 260)
+
+				c := pickCompareColor(leftStr, rightStr)
+				if c != (color.RGBA{R: 0, G: 0, B: 0, A: 255}) {
+					rect1 := canvas.NewRectangle(c)
+					rect1.SetMinSize(fyne.NewSize(10, 10))
+					rect2 := canvas.NewRectangle(c)
+					rect2.SetMinSize(fyne.NewSize(10, 10))
+					grid.Add(container.NewHBox(rect1, lbl1))
+					grid.Add(container.NewHBox(rect2, lbl2))
+				} else {
+					grid.Add(lbl1)
+					grid.Add(lbl2)
+				}
+			}
+			sections = append(sections, grid, widget.NewSeparator())
+			continue
+		}
+
+		// プリミティブ値: Left | Right の2列
+		leftStr := formatCompareValue(fa)
+		rightStr := formatCompareValue(fb)
+
+		row := container.NewGridWithColumns(2)
+		lbl1 := wrapWithMinWidth(makeWrappedLabel(leftStr), 260)
+		lbl2 := wrapWithMinWidth(makeWrappedLabel(rightStr), 260)
+
+		c := pickCompareColor(leftStr, rightStr)
+		if c != (color.RGBA{R: 0, G: 0, B: 0, A: 255}) {
+			rect1 := canvas.NewRectangle(c)
+			rect1.SetMinSize(fyne.NewSize(10, 10))
+			rect2 := canvas.NewRectangle(c)
+			rect2.SetMinSize(fyne.NewSize(10, 10))
+			row.Add(container.NewHBox(rect1, lbl1))
+			row.Add(container.NewHBox(rect2, lbl2))
+		} else {
+			row.Add(lbl1)
+			row.Add(lbl2)
+		}
+		sections = append(sections, row, widget.NewSeparator())
 	}
 
 	return container.NewVBox(sections...)
 }
 
-// pickColor は a と b が異なるとき赤、同じなら黒を返します。
-func pickColor(a, b string) color.Color {
+// pickCompareColor は a と b が異なるとき赤、同じなら黒を返します。
+func pickCompareColor(a, b string) color.Color {
 	if a != b {
 		return color.RGBA{R: 200, G: 0, B: 0, A: 255}
 	}
 	return color.RGBA{R: 0, G: 0, B: 0, A: 255}
+}
+
+// formatCompareValue は reflect.Value を比較用に文字列化します。
+func formatCompareValue(v reflect.Value) string {
+	if !v.IsValid() {
+		return "<invalid>"
+	}
+	switch v.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return fmt.Sprintf("%d", v.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return fmt.Sprintf("%d", v.Uint())
+	case reflect.Float32, reflect.Float64:
+		return fmt.Sprintf("%.6g", v.Float())
+	case reflect.String:
+		return v.String()
+	case reflect.Bool:
+		return fmt.Sprintf("%t", v.Bool())
+	default:
+		return fmt.Sprintf("%v", v.Interface())
+	}
 }

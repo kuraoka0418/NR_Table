@@ -3,11 +3,14 @@ package mygui
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
+	"NR_Table/myast"
 	"NR_Table/mydata"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -35,8 +38,6 @@ func NewMw(app fyne.App) *Mw {
 	btnData := widget.NewButton("Open DataCompare", func() {
 		OpenDataCompare(app)
 	})
-	topBtns := container.NewHBox(btnTwo, btnData)
-
 	// テーブルのインデックスを表示するリスト（独立してスクロール可能）
 	list := widget.NewList(
 		func() int { return len(mydata.TableList) },
@@ -49,6 +50,36 @@ func NewMw(app fyne.App) *Mw {
 			o.(*widget.Label).SetText(fmt.Sprintf("Table %d", i))
 		},
 	)
+
+	// 新規: 外部の weldtbl.c を選択して読み込むボタン
+	btnLoad := widget.NewButton("Load weldtbl...", func() {
+		// モーダルでパス入力用のダイアログを表示
+		entry := widget.NewEntry()
+		entry.SetPlaceHolder("Path to weldtbl.c")
+		content := container.NewVBox(widget.NewLabel("Enter path to weldtbl.c:"), entry)
+		dialog.ShowCustomConfirm("Load weldtbl", "Load", "Cancel", content, func(confirm bool) {
+			if !confirm {
+				return
+			}
+			path := entry.Text
+			path = strings.Trim(path, `"`)
+			if path == "" {
+				dialog.ShowError(fmt.Errorf("invalid file path"), w)
+				return
+			}
+			if err := myast.ParseWeldTable(path); err != nil {
+				dialog.ShowError(err, w)
+				return
+			}
+			// refresh list and select first table if any
+			list.Refresh()
+			if len(mydata.TableList) > 0 {
+				list.Select(0)
+			}
+			dialog.ShowInformation("Loaded", fmt.Sprintf("Loaded %d tables", len(mydata.TableList)), w)
+		}, w)
+	})
+	topBtns := container.NewHBox(btnTwo, btnData, btnLoad)
 
 	// 右側：初期表示（テーブル選択を促すヒント）
 	rightContent := container.NewVBox(widget.NewLabel("Select a table from the list."))
