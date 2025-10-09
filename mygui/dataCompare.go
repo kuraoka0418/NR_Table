@@ -1,10 +1,12 @@
 package mygui
 
 import (
-	"fmt"
+	// fmt is removed in favor of strconv formatting below
+
 	"image/color"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"NR_Table/mydata"
 
@@ -26,10 +28,10 @@ func OpenDataCompare(app fyne.App) {
 	internalKeys := []string{
 		"WeldCode.Material",
 		"WeldCode.Method",
-		"WeldParm",  // requires index
-		"A2S_Short", // requires index
-		"S2V_Short", // requires index
-		"CalParm",   // requires V index
+		"WeldParm",  // インデックスが必要
+		"A2S_Short", // インデックスが必要
+		"S2V_Short", // インデックスが必要
+		"CalParm",   // V番号のインデックスが必要
 		"V05_Data", "V06_Data", "V08_Data", "V12_Data",
 		"V13_Data", "V15_Data", "V18_Data", "V19_Data", "V20_Data",
 		"V32_Data", "V34_Data", "V36_Data",
@@ -37,7 +39,7 @@ func OpenDataCompare(app fyne.App) {
 		"V94_Data", "V95_Data", "V57_Data", "V93_Data",
 	}
 
-	// 説明 -> 内部キー マップと説明リストを作成
+	// 表示用の説明文 -> 内部キー のマップと、説明文リストを作成
 	descToKey := map[string]string{}
 	keyDescs := make([]string, 0, len(internalKeys))
 	for _, k := range internalKeys {
@@ -54,20 +56,20 @@ func OpenDataCompare(app fyne.App) {
 		keySelect.SetSelected(keyDescs[0])
 	}
 
-	// index entry for array-like keys
+	// 配列等のキー用のインデックス入力欄
 	indexEntry := widget.NewEntry()
 	indexEntry.SetPlaceHolder("index (0-based)")
 	indexEntry.Disable()
 
-	// 指定可能範囲を表示するラベル
+	// 指定可能なインデックス範囲を表示するラベル
 	rangeLabel := widget.NewLabel("")
 	rangeLabel.Hide()
 
-	// status and result area
+	// ステータス表示と結果表示領域
 	status := widget.NewLabel("")
 	resultBox := container.NewVBox()
 
-	// helper to enable/disable controls based on selected description and show valid range
+	// 選択中の説明文に応じて、コントロールの有効/無効と範囲表示を切り替えるヘルパ
 	updateControls := func(selectedDesc string) {
 		key, ok := descToKey[selectedDesc]
 		if !ok {
@@ -89,7 +91,7 @@ func OpenDataCompare(app fyne.App) {
 			rangeLabel.SetText("指定可能範囲: 0-22 (V1-V23)")
 			rangeLabel.Show()
 		default:
-			// Vxx arrays
+			// Vxx 系の配列
 			if len(key) > 0 && key[0] == 'V' {
 				indexEntry.Enable()
 				rangeLabel.SetText("指定可能範囲: 0-127")
@@ -104,32 +106,39 @@ func OpenDataCompare(app fyne.App) {
 	keySelect.OnChanged = updateControls
 	updateControls(keySelect.Selected)
 
-	// value extractor: returns string representation for given table/internalKey/index
+	// 指定したテーブル・キー・インデックスから表示用文字列を取得するヘルパ
 	// CalParm の場合は a,b,c,min,max を横に並べた文字列を返す
 	getValue := func(tbl *mydata.TableData, key string, idx int) string {
 		v := reflect.ValueOf(*tbl)
 		switch key {
 		case "WeldCode.Material":
-			return fmt.Sprintf("%d", tbl.WeldCode.Material)
+			return strconv.Itoa(int(tbl.WeldCode.Material))
 		case "WeldCode.Method":
-			return fmt.Sprintf("%d", tbl.WeldCode.Method)
+			return strconv.Itoa(int(tbl.WeldCode.Method))
 		case "WeldParm":
 			if idx < 0 || idx >= len(tbl.WeldParm.Parm) {
 				return "<範囲外>"
 			}
-			return fmt.Sprintf("0x%04X", tbl.WeldParm.Parm[idx])
+			// 0x + 4桁の大文字16進数
+			v := uint64(tbl.WeldParm.Parm[idx])
+			s := strings.ToUpper(strconv.FormatUint(v, 16))
+			// pad to 4
+			for len(s) < 4 {
+				s = "0" + s
+			}
+			return "0x" + s
 		case "A2S_Short":
 			if idx < 0 || idx >= len(tbl.A2S_Short.Speed) {
 				return "<範囲外>"
 			}
-			return fmt.Sprintf("%d", tbl.A2S_Short.Speed[idx])
+			return strconv.Itoa(int(tbl.A2S_Short.Speed[idx]))
 		case "S2V_Short":
 			if idx < 0 || idx >= len(tbl.S2V_Short.Values) {
 				return "<範囲外>"
 			}
-			return fmt.Sprintf("%d", tbl.S2V_Short.Values[idx])
+			return strconv.Itoa(int(tbl.S2V_Short.Values[idx]))
 		case "CalParm":
-			// CalParm の場合、指定された V# の a,b,c,min,max を横並びで表示
+			// CalParm の場合、指定した V# の a,b,c,min,max を横並びで取得
 			rv := v.FieldByName("CalParm")
 			if !rv.IsValid() {
 				return "<na>"
@@ -162,41 +171,123 @@ func OpenDataCompare(app fyne.App) {
 					if maxStr == "" {
 						maxStr = formatValue(el.Field(4))
 					}
-					return fmt.Sprintf("a=%s, b=%s, c=%s, min=%s, max=%s", aStr, bStr, cStr, minStr, maxStr)
+					return "a=" + aStr + ", b=" + bStr + ", c=" + cStr + ", min=" + minStr + ", max=" + maxStr
 				} else if elem.Kind() == reflect.Float32 || elem.Kind() == reflect.Float64 {
-					// フラット配列の場合、5個ずつグループ化
+					// フラット配列の場合は5個ずつグループ化して V# に対応させる
 					base := idx * 5
 					if base < 0 || base+4 >= rv.Len() {
 						return "<範囲外>"
 					}
-					a := fmt.Sprintf("%.6g", rv.Index(base).Float())
-					b := fmt.Sprintf("%.6g", rv.Index(base+1).Float())
-					c := fmt.Sprintf("%.6g", rv.Index(base+2).Float())
-					min := fmt.Sprintf("%.6g", rv.Index(base+3).Float())
-					max := fmt.Sprintf("%.6g", rv.Index(base+4).Float())
-					return fmt.Sprintf("a=%s, b=%s, c=%s, min=%s, max=%s", a, b, c, min, max)
+					a := strconv.FormatFloat(rv.Index(base).Float(), 'g', -1, 64)
+					b := strconv.FormatFloat(rv.Index(base+1).Float(), 'g', -1, 64)
+					c := strconv.FormatFloat(rv.Index(base+2).Float(), 'g', -1, 64)
+					min := strconv.FormatFloat(rv.Index(base+3).Float(), 'g', -1, 64)
+					max := strconv.FormatFloat(rv.Index(base+4).Float(), 'g', -1, 64)
+					return "a=" + a + ", b=" + b + ", c=" + c + ", min=" + min + ", max=" + max
 				}
 			}
 			return "<unknown CalParm>"
+		case "V05_Data":
+			if idx < 0 || idx >= len(tbl.V05_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V05_Data[idx]))
+		case "V06_Data":
+			if idx < 0 || idx >= len(tbl.V06_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V06_Data[idx]))
+		case "V08_Data":
+			if idx < 0 || idx >= len(tbl.V08_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V08_Data[idx]))
+		case "V12_Data":
+			if idx < 0 || idx >= len(tbl.V12_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V12_Data[idx]))
+		case "V13_Data":
+			if idx < 0 || idx >= len(tbl.V13_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V13_Data[idx]))
+		case "V15_Data":
+			if idx < 0 || idx >= len(tbl.V15_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V15_Data[idx]))
+		case "V18_Data":
+			if idx < 0 || idx >= len(tbl.V18_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V18_Data[idx]))
+		case "V19_Data":
+			if idx < 0 || idx >= len(tbl.V19_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V19_Data[idx]))
+		case "V20_Data":
+			if idx < 0 || idx >= len(tbl.V20_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V20_Data[idx]))
+		case "V32_Data":
+			if idx < 0 || idx >= len(tbl.V32_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V32_Data[idx]))
+		case "V34_Data":
+			if idx < 0 || idx >= len(tbl.V34_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V34_Data[idx]))
+		case "V36_Data":
+			if idx < 0 || idx >= len(tbl.V36_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V36_Data[idx]))
+		case "V56_Data":
+			if idx < 0 || idx >= len(tbl.V56_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V56_Data[idx]))
+		case "V57_Data":
+			if idx < 0 || idx >= len(tbl.V57_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V57_Data[idx]))
+		case "V59_Data":
+			if idx < 0 || idx >= len(tbl.V59_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V59_Data[idx]))
+		case "V68_Data":
+			if idx < 0 || idx >= len(tbl.V68_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V68_Data[idx]))
+		case "V93_Data":
+			if idx < 0 || idx >= len(tbl.V93_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V93_Data[idx]))
+		case "V94_Data":
+			if idx < 0 || idx >= len(tbl.V94_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V94_Data[idx]))
+		case "V95_Data":
+			if idx < 0 || idx >= len(tbl.V95_Data) {
+				return "<範囲外>"
+			}
+			return strconv.Itoa(int(tbl.V95_Data[idx]))
 		default:
-			// try to map Vxx fields by reflection
-			f := v.FieldByName(key)
-			if f.IsValid() && (f.Kind() == reflect.Array || f.Kind() == reflect.Slice) {
-				if idx < 0 || idx >= f.Len() {
-					return "<範囲外>"
-				}
-				return formatValue(f.Index(idx))
-			}
-			// fallback: try direct field
-			f2 := v.FieldByName(key)
-			if f2.IsValid() {
-				return formatValue(f2)
-			}
 			return "<na>"
 		}
 	}
 
-	// compare action
+	// 比較ボタンのアクション（結果表示）
 	compareBtn := widget.NewButton("Compare", func() {
 		if len(mydata.TableList) == 0 {
 			status.SetText("No tables loaded")
@@ -237,6 +328,7 @@ func OpenDataCompare(app fyne.App) {
 			}
 		}
 
+		// 各テーブルについて値を取得し、頻度を数える
 		counts := map[string]int{}
 		values := make([]string, len(mydata.TableList))
 		hasError := false
@@ -254,14 +346,13 @@ func OpenDataCompare(app fyne.App) {
 			return
 		}
 
-		// find max frequency
+		// 最も多い出現回数を見つけ、それを持つ値を収集する
 		max := 0
 		for _, c := range counts {
 			if c > max {
 				max = c
 			}
 		}
-		// collect all values with max freq
 		maxVals := map[string]struct{}{}
 		for v, c := range counts {
 			if c == max {
@@ -269,31 +360,30 @@ func OpenDataCompare(app fyne.App) {
 			}
 		}
 
-		// build result UI: per-table table (2 columns: Table | Value)
+		// 結果表示領域を作成: テーブルごとに行を表示（Table | Value）
 		resultBox.Objects = nil
 
-		// create a grid with 2 columns: Table index, Value
 		grid := container.NewGridWithColumns(2)
-		// header
+		// ヘッダ
 		grid.Add(widget.NewLabelWithStyle("Table", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
 		grid.Add(widget.NewLabelWithStyle("Value", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
 		for i, val := range values {
-			grid.Add(widget.NewLabel(fmt.Sprintf("%d", i)))
-			// 通常テキストはテーマの foreground を使い、ダーク/ライト両対応にする
-			col := theme.ForegroundColor()
+			grid.Add(widget.NewLabel(strconv.Itoa(i)))
+			// 通常テキストはテーマの前景色を使用してダーク/ライトに対応
+			col := theme.Color(theme.ColorNameForeground)
 			if _, ok := maxVals[val]; ok {
-				col = color.RGBA{R: 0, G: 128, B: 0, A: 255}
+				col = color.RGBA{R: 0, G: 128, B: 0, A: 255} // 最頻値は緑でハイライト
 			}
 			grid.Add(canvas.NewText(val, col))
 		}
 
-		// make the table area taller so it occupies most of the window vertically
+		// 結果表示領域を縦スクロールにして十分な高さを確保
 		tableScroll := container.NewVScroll(grid)
 		tableScroll.SetMinSize(fyne.NewSize(800, 520))
 		resultBox.Add(tableScroll)
 
 		resultBox.Refresh()
-		status.SetText(fmt.Sprintf("Compared %d tables", len(values)))
+		status.SetText("Compared " + strconv.Itoa(len(values)) + " tables")
 	})
 
 	controls := container.NewVBox(
@@ -321,13 +411,13 @@ func formatReflectFloatField(f reflect.Value, fieldName string, fallbackIndex in
 	}
 	ff := f.FieldByName(fieldName)
 	if ff.IsValid() && (ff.Kind() == reflect.Float32 || ff.Kind() == reflect.Float64) {
-		return fmt.Sprintf("%.6g", ff.Convert(reflect.TypeOf(float64(0))).Float())
+		return strconv.FormatFloat(ff.Convert(reflect.TypeOf(float64(0))).Float(), 'g', 6, 64)
 	}
 	// fallback by index
 	if fallbackIndex >= 0 && fallbackIndex < f.NumField() {
 		fld := f.Field(fallbackIndex)
 		if fld.Kind() == reflect.Float32 || fld.Kind() == reflect.Float64 {
-			return fmt.Sprintf("%.6g", fld.Convert(reflect.TypeOf(float64(0))).Float())
+			return strconv.FormatFloat(fld.Convert(reflect.TypeOf(float64(0))).Float(), 'g', 6, 64)
 		}
 	}
 	return "<na>"

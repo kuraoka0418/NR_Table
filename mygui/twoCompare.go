@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"NR_Table/mydata"
 
@@ -50,7 +51,7 @@ func OpenTwoCompare(app fyne.App) {
 	// インデックスリスト作成
 	idxs := make([]string, numTables)
 	for i := 0; i < numTables; i++ {
-		idxs[i] = fmt.Sprintf("%d", i)
+		idxs[i] = strconv.Itoa(i)
 	}
 
 	// UI パーツ
@@ -107,7 +108,7 @@ func OpenTwoCompare(app fyne.App) {
 
 		newScroll.ScrollToTop()
 
-		status.SetText(fmt.Sprintf("Compared Table %d ↔ Table %d", li, ri))
+		status.SetText("Compared Table " + strconv.Itoa(li) + " ↔ Table " + strconv.Itoa(ri))
 	}
 
 	compareBtn.OnTapped = compareAction
@@ -133,7 +134,7 @@ func buildUnifiedComparisonView(a, b *mydata.TableData) fyne.CanvasObject {
 		desc := fieldDescriptions[name]
 		header := name
 		if desc != "" {
-			header = fmt.Sprintf("%s — %s", name, desc)
+			header = name + " — " + desc
 		}
 
 		// セクション見出し（折り返し有効）
@@ -158,11 +159,27 @@ func buildUnifiedComparisonView(a, b *mydata.TableData) fyne.CanvasObject {
 				grid.Add(widget.NewLabel("Left"))
 				grid.Add(widget.NewLabel("Right"))
 				for j := 0; j < n; j++ {
-					grid.Add(widget.NewLabel(fmt.Sprintf("H%03d", j+1)))
-					leftStr := fmt.Sprintf("0x%04X", arr.Index(j).Uint())
+					// H### (zero-padded)
+					num := strconv.Itoa(j + 1)
+					for len(num) < 3 {
+						num = "0" + num
+					}
+					grid.Add(widget.NewLabel("H" + num))
+					// 0x + 4桁大文字16進
+					hv := arr.Index(j).Uint()
+					hs := strings.ToUpper(strconv.FormatUint(hv, 16))
+					for len(hs) < 4 {
+						hs = "0" + hs
+					}
+					leftStr := "0x" + hs
 					rightStr := "<nil>"
 					if arrB.IsValid() && j < arrB.Len() {
-						rightStr = fmt.Sprintf("0x%04X", arrB.Index(j).Uint())
+						hvb := arrB.Index(j).Uint()
+						hsb := strings.ToUpper(strconv.FormatUint(hvb, 16))
+						for len(hsb) < 4 {
+							hsb = "0" + hsb
+						}
+						rightStr = "0x" + hsb
 					}
 
 					lbl1 := wrapWithMinWidth(makeWrappedLabel(leftStr), 260)
@@ -234,7 +251,7 @@ func buildUnifiedComparisonView(a, b *mydata.TableData) fyne.CanvasObject {
 						if maxStr == "" {
 							maxStr = formatCompareValue(elA.Field(4))
 						}
-						leftVal := fmt.Sprintf("%s,%s,%s,%s,%s", aStr, bStr, cStr, minStr, maxStr)
+						leftVal := strings.Join([]string{aStr, bStr, cStr, minStr, maxStr}, ",")
 
 						// 右側の値
 						var aStrB, bStrB, cStrB, minStrB, maxStrB string
@@ -260,10 +277,10 @@ func buildUnifiedComparisonView(a, b *mydata.TableData) fyne.CanvasObject {
 								maxStrB = formatCompareValue(elB.Field(4))
 							}
 						}
-						rightVal := fmt.Sprintf("%s,%s,%s,%s,%s", aStrB, bStrB, cStrB, minStrB, maxStrB)
+						rightVal := strings.Join([]string{aStrB, bStrB, cStrB, minStrB, maxStrB}, ",")
 
 						row := container.NewGridWithColumns(3)
-						row.Add(widget.NewLabel(fmt.Sprintf("V%d", vi+1)))
+						row.Add(widget.NewLabel("V" + strconv.Itoa(vi+1)))
 
 						lbl1 := wrapWithMinWidth(makeWrappedLabel(leftVal), 260)
 						lbl2 := wrapWithMinWidth(makeWrappedLabel(rightVal), 260)
@@ -300,18 +317,18 @@ func buildUnifiedComparisonView(a, b *mydata.TableData) fyne.CanvasObject {
 							leftVals := make([]string, 5)
 							rightVals := make([]string, 5)
 							for j := 0; j < 5; j++ {
-								leftVals[j] = fmt.Sprintf("%.6g", calcObjA.Index(base+j).Float())
+								leftVals[j] = strconv.FormatFloat(calcObjA.Index(base+j).Float(), 'g', 6, 64)
 								if base+j < calcObjB.Len() {
-									rightVals[j] = fmt.Sprintf("%.6g", calcObjB.Index(base+j).Float())
+									rightVals[j] = strconv.FormatFloat(calcObjB.Index(base+j).Float(), 'g', 6, 64)
 								} else {
 									rightVals[j] = "<nil>"
 								}
 							}
-							leftStr := fmt.Sprintf("%s,%s,%s,%s,%s", leftVals[0], leftVals[1], leftVals[2], leftVals[3], leftVals[4])
-							rightStr := fmt.Sprintf("%s,%s,%s,%s,%s", rightVals[0], rightVals[1], rightVals[2], rightVals[3], rightVals[4])
+							leftStr := strings.Join(leftVals, ",")
+							rightStr := strings.Join(rightVals, ",")
 
 							row := container.NewGridWithColumns(3)
-							row.Add(widget.NewLabel(fmt.Sprintf("V%d", vi+1)))
+							row.Add(widget.NewLabel("V" + strconv.Itoa(vi+1)))
 
 							lbl1 := wrapWithMinWidth(makeWrappedLabel(leftStr), 260)
 							lbl2 := wrapWithMinWidth(makeWrappedLabel(rightStr), 260)
@@ -350,7 +367,7 @@ func buildUnifiedComparisonView(a, b *mydata.TableData) fyne.CanvasObject {
 				grid.Add(widget.NewLabel("Right"))
 				n := fa.Len()
 				for idx := 0; idx < n; idx++ {
-					grid.Add(widget.NewLabel(fmt.Sprintf("%d", idx)))
+					grid.Add(widget.NewLabel(strconv.Itoa(idx)))
 					leftStr := formatCompareValue(fa.Index(idx))
 					rightStr := "<nil>"
 					if idx < fb.Len() {
@@ -453,15 +470,18 @@ func formatCompareValue(v reflect.Value) string {
 	}
 	switch v.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return fmt.Sprintf("%d", v.Int())
+		return strconv.FormatInt(v.Int(), 10)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return fmt.Sprintf("%d", v.Uint())
+		return strconv.FormatUint(v.Uint(), 10)
 	case reflect.Float32, reflect.Float64:
-		return fmt.Sprintf("%.6g", v.Float())
+		return strconv.FormatFloat(v.Float(), 'g', 6, 64)
 	case reflect.String:
 		return v.String()
 	case reflect.Bool:
-		return fmt.Sprintf("%t", v.Bool())
+		if v.Bool() {
+			return "true"
+		}
+		return "false"
 	default:
 		return fmt.Sprintf("%v", v.Interface())
 	}

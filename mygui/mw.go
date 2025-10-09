@@ -3,6 +3,7 @@ package mygui
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"NR_Table/myast"
@@ -47,7 +48,7 @@ func NewMw(app fyne.App) *Mw {
 			return lbl
 		},
 		func(i int, o fyne.CanvasObject) {
-			o.(*widget.Label).SetText(fmt.Sprintf("Table %d", i))
+			o.(*widget.Label).SetText("Table " + strconv.Itoa(i))
 		},
 	)
 
@@ -76,7 +77,7 @@ func NewMw(app fyne.App) *Mw {
 			if len(mydata.TableList) > 0 {
 				list.Select(0)
 			}
-			dialog.ShowInformation("Loaded", fmt.Sprintf("Loaded %d tables", len(mydata.TableList)), w)
+			dialog.ShowInformation("Loaded", "Loaded "+strconv.Itoa(len(mydata.TableList))+" tables", w)
 		}, w)
 	})
 	topBtns := container.NewHBox(btnTwo, btnData, btnLoad)
@@ -170,36 +171,39 @@ var fieldDescriptions = map[string]string{
 func buildDetailView(table *mydata.TableData) fyne.CanvasObject {
 	sections := []fyne.CanvasObject{}
 
-	// 1) WeldCode: key/value 表（軽量なので常時表示）
+	// 1) WeldCode: 折りたたみ式で表示（表示名は fieldDescriptions から取得）
 	{
-		secLabel := widget.NewLabel("WeldCode — " + fieldDescriptions["WeldCode"])
-		secLabel.TextStyle = fyne.TextStyle{Bold: true}
+		title := fieldDescriptions["WeldCode"]
 		grid := container.NewGridWithColumns(2)
 		grid.Add(widget.NewLabel("Material"))
-		grid.Add(widget.NewLabel(fmt.Sprintf("%d", table.WeldCode.Material)))
+		grid.Add(widget.NewLabel(strconv.Itoa(int(table.WeldCode.Material))))
 		grid.Add(widget.NewLabel("Method"))
-		grid.Add(widget.NewLabel(fmt.Sprintf("%d", table.WeldCode.Method)))
+		grid.Add(widget.NewLabel(strconv.Itoa(int(table.WeldCode.Method))))
 		grid.Add(widget.NewLabel("PulseMode"))
-		grid.Add(widget.NewLabel(fmt.Sprintf("%d", table.WeldCode.PulseMode)))
+		grid.Add(widget.NewLabel(strconv.Itoa(int(table.WeldCode.PulseMode))))
 		grid.Add(widget.NewLabel("PulseType"))
-		grid.Add(widget.NewLabel(fmt.Sprintf("%d", table.WeldCode.PulseType)))
+		grid.Add(widget.NewLabel(strconv.Itoa(int(table.WeldCode.PulseType))))
 		grid.Add(widget.NewLabel("Wire"))
-		grid.Add(widget.NewLabel(fmt.Sprintf("%d", table.WeldCode.Wire)))
+		grid.Add(widget.NewLabel(strconv.Itoa(int(table.WeldCode.Wire))))
 		grid.Add(widget.NewLabel("Extension"))
-		grid.Add(widget.NewLabel(fmt.Sprintf("%d", table.WeldCode.Extension)))
+		grid.Add(widget.NewLabel(strconv.Itoa(int(table.WeldCode.Extension))))
 		grid.Add(widget.NewLabel("Tip"))
-		grid.Add(widget.NewLabel(fmt.Sprintf("%d", table.WeldCode.Tip)))
+		grid.Add(widget.NewLabel(strconv.Itoa(int(table.WeldCode.Tip))))
 		grid.Add(widget.NewLabel("Flag2"))
-		grid.Add(widget.NewLabel(fmt.Sprintf("%d", table.WeldCode.Flag2)))
+		grid.Add(widget.NewLabel(strconv.Itoa(int(table.WeldCode.Flag2))))
 		grid.Add(widget.NewLabel("Version"))
-		grid.Add(widget.NewLabel(fmt.Sprintf("%d", table.WeldCode.Version)))
+		grid.Add(widget.NewLabel(strconv.Itoa(int(table.WeldCode.Version))))
 		grid.Add(widget.NewLabel("StandardFlag"))
-		grid.Add(widget.NewLabel(fmt.Sprintf("%d", table.WeldCode.StandardFlag)))
+		grid.Add(widget.NewLabel(strconv.Itoa(int(table.WeldCode.StandardFlag))))
 		grid.Add(widget.NewLabel("Flag3"))
-		grid.Add(widget.NewLabel(fmt.Sprintf("%d", table.WeldCode.Flag3)))
+		grid.Add(widget.NewLabel(strconv.Itoa(int(table.WeldCode.Flag3))))
 		grid.Add(widget.NewLabel("LowSputter"))
-		grid.Add(widget.NewLabel(fmt.Sprintf("%d", table.WeldCode.LowSputter)))
-		sections = append(sections, secLabel, grid, widget.NewSeparator())
+		grid.Add(widget.NewLabel(strconv.Itoa(int(table.WeldCode.LowSputter))))
+
+		// 折りたたみ式の Accordion として追加する
+		item := widget.NewAccordionItem(title, grid)
+		acc := widget.NewAccordion(item)
+		sections = append(sections, acc, widget.NewSeparator())
 	}
 
 	// 2) WeldParm: 折りたたみ式で表示（504要素）
@@ -208,8 +212,16 @@ func buildDetailView(table *mydata.TableData) fyne.CanvasObject {
 		item := widget.NewAccordionItem(title, createLazyGrid(func() fyne.CanvasObject {
 			grid := container.NewGridWithColumns(2)
 			for i := 0; i < len(table.WeldParm.Parm); i++ {
-				grid.Add(widget.NewLabel(fmt.Sprintf("H%03d", i+1)))
-				grid.Add(widget.NewLabel(fmt.Sprintf("0x%04X", table.WeldParm.Parm[i])))
+				num := strconv.Itoa(i + 1)
+				for len(num) < 3 {
+					num = "0" + num
+				}
+				grid.Add(widget.NewLabel("H" + num))
+				hs := strings.ToUpper(strconv.FormatUint(uint64(table.WeldParm.Parm[i]), 16))
+				for len(hs) < 4 {
+					hs = "0" + hs
+				}
+				grid.Add(widget.NewLabel("0x" + hs))
 			}
 			return grid
 		}))
@@ -254,7 +266,7 @@ func buildDetailView(table *mydata.TableData) fyne.CanvasObject {
 					if max == "" {
 						max = formatValue(el.Field(4))
 					}
-					grid.Add(widget.NewLabel(fmt.Sprintf("V%d", i+1)))
+					grid.Add(widget.NewLabel("V" + strconv.Itoa(i+1)))
 					grid.Add(widget.NewLabel(a))
 					grid.Add(widget.NewLabel(b))
 					grid.Add(widget.NewLabel(c))
@@ -263,6 +275,7 @@ func buildDetailView(table *mydata.TableData) fyne.CanvasObject {
 				}
 				return grid
 			} else if elemKind == reflect.Float32 || elemKind == reflect.Float64 {
+				// フラット配列: 5個ずつグループ化して表示
 				grid := container.NewGridWithColumns(6)
 				grid.Add(widget.NewLabel("V#"))
 				grid.Add(widget.NewLabel("a"))
@@ -271,13 +284,23 @@ func buildDetailView(table *mydata.TableData) fyne.CanvasObject {
 				grid.Add(widget.NewLabel("min"))
 				grid.Add(widget.NewLabel("max"))
 				total := calcObj.Len()
-				if total >= 5 && total%5 == 0 {
+				if total >= 5 {
+					// グループ数は切り上げではなく、利用可能な要素で最大限表示する
 					count := total / 5
+					// if there is a remainder, still show last partial group
+					if total%5 != 0 {
+						count = (total + 4) / 5
+					}
 					for i := 0; i < count; i++ {
 						base := i * 5
-						grid.Add(widget.NewLabel(fmt.Sprintf("V%d", i+1)))
+						grid.Add(widget.NewLabel("V" + strconv.Itoa(i+1)))
 						for j := 0; j < 5; j++ {
-							grid.Add(widget.NewLabel(fmt.Sprintf("%.6g", calcObj.Index(base+j).Float())))
+							idx := base + j
+							if idx < total {
+								grid.Add(widget.NewLabel(strconv.FormatFloat(calcObj.Index(idx).Float(), 'g', 6, 64)))
+							} else {
+								grid.Add(widget.NewLabel("<na>"))
+							}
 						}
 					}
 				}
@@ -296,8 +319,24 @@ func buildDetailView(table *mydata.TableData) fyne.CanvasObject {
 			v := reflect.ValueOf(data)
 			if v.Kind() == reflect.Slice || v.Kind() == reflect.Array {
 				for i := 0; i < v.Len(); i++ {
-					grid.Add(widget.NewLabel(fmt.Sprintf("%d", i)))
-					grid.Add(widget.NewLabel(fmt.Sprintf("%v", v.Index(i).Interface())))
+					grid.Add(widget.NewLabel(strconv.Itoa(i)))
+					elem := v.Index(i)
+					// 型ごとに適切にフォーマットする
+					var sval string
+					switch elem.Kind() {
+					case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+						sval = strconv.FormatInt(elem.Int(), 10)
+					case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+						sval = strconv.FormatUint(elem.Uint(), 10)
+					case reflect.Float32, reflect.Float64:
+						sval = strconv.FormatFloat(elem.Float(), 'g', 6, 64)
+					case reflect.String:
+						sval = elem.String()
+					default:
+						// fallback
+						sval = fmt.Sprintf("%v", elem.Interface())
+					}
+					grid.Add(widget.NewLabel(sval))
 				}
 			}
 			return grid
@@ -338,13 +377,13 @@ func buildDetailView(table *mydata.TableData) fyne.CanvasObject {
 		{"V93_Data", table.V93_Data[:], fieldDescriptions["V93_Data"]},
 	}
 	for _, vf := range vfields {
-		addArrayAccordion(fmt.Sprintf("%s — %s", vf.name, vf.desc), vf.arr)
+		addArrayAccordion(vf.name+" — "+vf.desc, vf.arr)
 	}
 
 	// 6) CalParmDataTable: 折りたたみ式
 	for idx := 0; idx < len(table.CalParmDataTable); idx++ {
 		tbl := table.CalParmDataTable[idx]
-		addArrayAccordion(fmt.Sprintf("CalParmDataTable[%d] — %s", idx, fieldDescriptions["CalParmDataTable"]), tbl.Data[:])
+		addArrayAccordion("CalParmDataTable["+strconv.Itoa(idx)+"] — "+fieldDescriptions["CalParmDataTable"], tbl.Data[:])
 	}
 
 	// 7) Navi arrays: 折りたたみ式（各7要素、軽量なので展開しても可）
@@ -394,7 +433,7 @@ func getFloatFieldAsString(v reflect.Value, fieldName string) string {
 	}
 	f := v.FieldByName(fieldName)
 	if f.IsValid() && (f.Kind() == reflect.Float32 || f.Kind() == reflect.Float64) {
-		return fmt.Sprintf("%.6g", f.Convert(reflect.TypeOf(float64(0))).Float())
+		return strconv.FormatFloat(f.Convert(reflect.TypeOf(float64(0))).Float(), 'g', 6, 64)
 	}
 	return ""
 }
@@ -406,11 +445,11 @@ func formatValue(v reflect.Value) string {
 	}
 	switch v.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return fmt.Sprintf("%d", v.Int())
+		return strconv.FormatInt(v.Int(), 10)
 	case reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr, reflect.Uint8:
-		return fmt.Sprintf("%d", v.Uint())
+		return strconv.FormatUint(v.Uint(), 10)
 	case reflect.Float32, reflect.Float64:
-		return fmt.Sprintf("%.6g", v.Float())
+		return strconv.FormatFloat(v.Float(), 'g', 6, 64)
 	default:
 		return fmt.Sprintf("%v", v.Interface())
 	}
