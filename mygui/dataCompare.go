@@ -80,15 +80,17 @@ func OpenDataCompare(app fyne.App) {
 		switch key {
 		case "WeldParm":
 			indexEntry.Enable()
-			rangeLabel.SetText("指定可能範囲: 0-503")
+			// ユーザーには1スタートで表示（H1..H504）
+			rangeLabel.SetText("指定可能範囲: 1-504 (H1-H504)")
 			rangeLabel.Show()
 		case "A2S_Short", "S2V_Short":
 			indexEntry.Enable()
-			rangeLabel.SetText("指定可能範囲: 0-255")
+			rangeLabel.SetText("指定可能範囲: 1-256")
 			rangeLabel.Show()
 		case "CalParm":
 			indexEntry.Enable()
-			rangeLabel.SetText("指定可能範囲: 0-22 (V1-V23)")
+			// CalParm の V# は V1..V23 をユーザーに 1 スタートで表示
+			rangeLabel.SetText("指定可能範囲: 1-23 (V1-V23)")
 			rangeLabel.Show()
 		default:
 			// Vxx 系の配列
@@ -321,7 +323,8 @@ func OpenDataCompare(app fyne.App) {
 				return
 			}
 			if n, err := strconv.Atoi(indexEntry.Text); err == nil {
-				idx = n
+				// ユーザー入力は1スタート -> 内部では0スタートに変換
+				idx = n - 1
 			} else {
 				status.SetText("Invalid index")
 				return
